@@ -8,6 +8,7 @@ spikeinterface.core
     .. autofunction:: load
     .. autoclass:: BaseRecording
         :members:
+        :inherited-members:
     .. autoclass:: BaseSorting
         :members:
     .. autoclass:: BaseSnippets
@@ -111,6 +112,7 @@ NEO-based
     .. autofunction:: read_neuralynx
     .. autofunction:: read_neuralynx_sorting
     .. autofunction:: read_neuroexplorer
+    .. autofunction:: read_neuroexplorer_sorting
     .. autofunction:: read_neuroscope
     .. autofunction:: read_nix
     .. autofunction:: read_openephys

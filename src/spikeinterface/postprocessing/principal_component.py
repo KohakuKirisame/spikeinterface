@@ -171,16 +171,24 @@ class ComputePrincipalComponents(AnalyzerExtension):
             * if mode is "by_channel_local", "pca_model" is a list of PCA model by channel
             * if mode is "by_channel_global" or "concatenated", "pca_model" is a single PCA model
         """
-        if self.sorting_analyzer._lazy:
-            raise RuntimeError("PCA models are not loaded in lazy mode. Reload the sorting analyzer in non-lazy mode.")
         mode = self.params["mode"]
         if mode == "by_channel_local":
             pca_models = []
             for chan_id in self.sorting_analyzer.channel_ids:
-                pca_models.append(self.data[f"pca_model_{mode}_{chan_id}"])
+                pca_model = self.data.get(f"pca_model_{mode}_{chan_id}")
+                if pca_model is None and self._sorting_analyzer._lazy:
+                    raise RuntimeError(
+                        "PCA models are not loaded in lazy mode. Reload the sorting analyzer in non-lazy mode."
+                    )
+                pca_models.append(pca_model)
+            return pca_models
         else:
-            pca_models = self.data[f"pca_model_{mode}"]
-        return pca_models
+            pca_model = self.data.get(f"pca_model_{mode}")
+            if pca_model is None and self._sorting_analyzer._lazy:
+                raise RuntimeError(
+                    "PCA models are not loaded in lazy mode. Reload the sorting analyzer in non-lazy mode."
+                )
+            return pca_model
 
     def get_projections_one_unit(self, unit_id, sparse=False):
         """
@@ -330,8 +338,6 @@ class ComputePrincipalComponents(AnalyzerExtension):
         Compute the PCs on waveforms extacted within the by ComputeWaveforms.
         Projections are computed only on the waveforms sampled by the SortingAnalyzer.
         """
-        if self.sorting_analyzer._lazy:
-            raise RuntimeError("PCA models are not loaded in lazy mode. Reload the sorting analyzer in non-lazy mode.")
         p = self.params
         mode = p["mode"]
 
@@ -658,16 +664,14 @@ def _all_pc_extractor_chunk(segment_index, start_frame, end_frame, worker_ctx):
 
     nsamples = nbefore + nafter
 
-    # Extract all waveforms in the chunk at once
+    # Prepare waveform sample offsets for all spikes in the chunk
     spike_times_in_chunk = spike_times[i0:i1]
     # Offset spike times to be relative to the start of the traces buffer
     spike_times_offset = spike_times_in_chunk - start - nbefore
     spike_indices = np.arange(i0, i1)
 
-    # Build waveform array: (n_spikes, nsamples, n_channels)
-    # Use fancy indexing to extract all snippets at once
-    sample_indices = spike_times_offset[:, None] + np.arange(nsamples)[None, :]  # (n_spikes, nsamples)
-    all_wfs = traces[sample_indices]  # (n_spikes, nsamples, n_channels)
+    # This adds a sample axis using strides and does not allocate waveform data.
+    waveform_view = np.lib.stride_tricks.sliding_window_view(traces, nsamples, axis=0)
 
     # Vectorized PCA: batch by channel across all spikes in the chunk.
     # For each unique channel, find all spikes that use it (via their unit's
@@ -692,7 +696,7 @@ def _all_pc_extractor_chunk(segment_index, start_frame, end_frame, worker_ctx):
         global_idxs = spike_indices[all_local_idxs]
 
         # Batch waveforms for this channel: (n_spikes, nsamples)
-        wfs_batch = all_wfs[all_local_idxs, :, chan_ind]
+        wfs_batch = waveform_view[spike_times_offset[all_local_idxs], chan_ind]
 
         if wfs_batch.size == 0:
             continue
